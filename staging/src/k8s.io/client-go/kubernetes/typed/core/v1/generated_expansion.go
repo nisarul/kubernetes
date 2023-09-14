@@ -30,6 +30,8 @@ type PersistentVolumeExpansion interface{}
 
 type PersistentVolumeClaimExpansion interface{}
 
+type PodNetworkAttachmentExpansion interface{}
+
 type PodTemplateExpansion interface{}
 
 type ReplicationControllerExpansion interface{}

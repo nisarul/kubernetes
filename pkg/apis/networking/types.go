@@ -712,6 +712,11 @@ type IPAddressList struct {
 	Items []IPAddress
 }
 
+// +genclient
+// +genclient:nonNamespaced
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +k8s:prerelease-lifecycle-gen:introduced=1.27
+
 // PodNetwork represents a logical network in the K8s Cluster.
 // This logical network depends on the host networking setup on cluster nodes.
 type PodNetwork struct {
@@ -869,6 +874,11 @@ type PodNetworkList struct {
 	Items []PodNetwork `json:"items" protobuf:"bytes,2,rep,name=items"`
 }
 
+// +genclient
+// +genclient:nonNamespaced
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +k8s:prerelease-lifecycle-gen:introduced=1.27
+
 // PodNetworkAttachment provides optional pod-level configuration of PodNetwork.
 type PodNetworkAttachment struct {
 	metav1.TypeMeta `json:",inline"`
@@ -921,4 +931,20 @@ type PodNetworkAttachmentStatus struct {
 	// +listMapKey=type
 	// +kubebuilder:validation:MaxItems=5
 	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,req,name=conditions"`
+}
+
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +k8s:prerelease-lifecycle-gen:introduced=1.27
+
+// PodNetworkAttachmentList contains a list of PodNetworkAttachment.
+type PodNetworkAttachmentList struct {
+	metav1.TypeMeta `json:",inline"`
+
+	// Standard object's metadata.
+	// More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata
+	// +optional
+	metav1.ListMeta `json:"metadata,omitempty" protobuf:"bytes,1,opt,name=metadata"`
+
+	// items is the list of PodNetworkAttachments.
+	Items []PodNetworkAttachment `json:"items" protobuf:"bytes,2,rep,name=items"`
 }

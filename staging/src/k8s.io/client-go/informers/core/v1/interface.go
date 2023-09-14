@@ -44,6 +44,8 @@ type Interface interface {
 	PersistentVolumeClaims() PersistentVolumeClaimInformer
 	// Pods returns a PodInformer.
 	Pods() PodInformer
+	// PodNetworkAttachments returns a PodNetworkAttachmentInformer.
+	PodNetworkAttachments() PodNetworkAttachmentInformer
 	// PodTemplates returns a PodTemplateInformer.
 	PodTemplates() PodTemplateInformer
 	// ReplicationControllers returns a ReplicationControllerInformer.
@@ -117,6 +119,11 @@ func (v *version) PersistentVolumeClaims() PersistentVolumeClaimInformer {
 // Pods returns a PodInformer.
 func (v *version) Pods() PodInformer {
 	return &podInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
+}
+
+// PodNetworkAttachments returns a PodNetworkAttachmentInformer.
+func (v *version) PodNetworkAttachments() PodNetworkAttachmentInformer {
+	return &podNetworkAttachmentInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
 }
 
 // PodTemplates returns a PodTemplateInformer.

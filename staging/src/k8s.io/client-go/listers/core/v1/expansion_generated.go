@@ -82,6 +82,14 @@ type PodListerExpansion interface{}
 // PodNamespaceLister.
 type PodNamespaceListerExpansion interface{}
 
+// PodNetworkAttachmentListerExpansion allows custom methods to be added to
+// PodNetworkAttachmentLister.
+type PodNetworkAttachmentListerExpansion interface{}
+
+// PodNetworkAttachmentNamespaceListerExpansion allows custom methods to be added to
+// PodNetworkAttachmentNamespaceLister.
+type PodNetworkAttachmentNamespaceListerExpansion interface{}
+
 // PodTemplateListerExpansion allows custom methods to be added to
 // PodTemplateLister.
 type PodTemplateListerExpansion interface{}

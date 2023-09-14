@@ -68,6 +68,10 @@ func (c *FakeCoreV1) Pods(namespace string) v1.PodInterface {
 	return &FakePods{c, namespace}
 }
 
+func (c *FakeCoreV1) PodNetworkAttachments(namespace string) v1.PodNetworkAttachmentInterface {
+	return &FakePodNetworkAttachments{c, namespace}
+}
+
 func (c *FakeCoreV1) PodTemplates(namespace string) v1.PodTemplateInterface {
 	return &FakePodTemplates{c, namespace}
 }

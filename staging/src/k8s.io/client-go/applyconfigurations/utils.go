@@ -775,6 +775,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationscorev1.ObjectFieldSelectorApplyConfiguration{}
 	case corev1.SchemeGroupVersion.WithKind("ObjectReference"):
 		return &applyconfigurationscorev1.ObjectReferenceApplyConfiguration{}
+	case corev1.SchemeGroupVersion.WithKind("ParametersRef"):
+		return &applyconfigurationscorev1.ParametersRefApplyConfiguration{}
 	case corev1.SchemeGroupVersion.WithKind("PersistentVolume"):
 		return &applyconfigurationscorev1.PersistentVolumeApplyConfiguration{}
 	case corev1.SchemeGroupVersion.WithKind("PersistentVolumeClaim"):
@@ -813,6 +815,12 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationscorev1.PodDNSConfigOptionApplyConfiguration{}
 	case corev1.SchemeGroupVersion.WithKind("PodIP"):
 		return &applyconfigurationscorev1.PodIPApplyConfiguration{}
+	case corev1.SchemeGroupVersion.WithKind("PodNetworkAttachment"):
+		return &applyconfigurationscorev1.PodNetworkAttachmentApplyConfiguration{}
+	case corev1.SchemeGroupVersion.WithKind("PodNetworkAttachmentSpec"):
+		return &applyconfigurationscorev1.PodNetworkAttachmentSpecApplyConfiguration{}
+	case corev1.SchemeGroupVersion.WithKind("PodNetworkAttachmentStatus"):
+		return &applyconfigurationscorev1.PodNetworkAttachmentStatusApplyConfiguration{}
 	case corev1.SchemeGroupVersion.WithKind("PodOS"):
 		return &applyconfigurationscorev1.PodOSApplyConfiguration{}
 	case corev1.SchemeGroupVersion.WithKind("PodReadinessGate"):

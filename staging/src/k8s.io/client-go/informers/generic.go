@@ -217,6 +217,8 @@ func (f *sharedInformerFactory) ForResource(resource schema.GroupVersionResource
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Core().V1().PersistentVolumeClaims().Informer()}, nil
 	case corev1.SchemeGroupVersion.WithResource("pods"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Core().V1().Pods().Informer()}, nil
+	case corev1.SchemeGroupVersion.WithResource("podnetworkattachments"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Core().V1().PodNetworkAttachments().Informer()}, nil
 	case corev1.SchemeGroupVersion.WithResource("podtemplates"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Core().V1().PodTemplates().Informer()}, nil
 	case corev1.SchemeGroupVersion.WithResource("replicationcontrollers"):
