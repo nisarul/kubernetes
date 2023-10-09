@@ -36,9 +36,12 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/apiserver/pkg/apis/example"
 	genericapirequest "k8s.io/apiserver/pkg/endpoints/request"
+	"k8s.io/apiserver/pkg/features"
 	"k8s.io/apiserver/pkg/storage"
 	"k8s.io/apiserver/pkg/storage/value"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	utilflowcontrol "k8s.io/apiserver/pkg/util/flowcontrol"
+	featuregatetesting "k8s.io/component-base/featuregate/testing"
 	"k8s.io/utils/pointer"
 )
 
@@ -1217,6 +1220,346 @@ func RunSendInitialEventsBackwardCompatibility(ctx context.Context, t *testing.T
 	w, err := store.Watch(ctx, "/pods", opts)
 	require.NoError(t, err)
 	w.Stop()
+}
+
+// RunWatchSemantics test the following cases:
+//
+// +-----------------+---------------------+-------------------+
+// | ResourceVersion | AllowWatchBookmarks | SendInitialEvents |
+// +=================+=====================+===================+
+// | Unset           | true/false          | true/false        |
+// | 0               | true/false          | true/false        |
+// | 1               | true/false          | true/false        |
+// | Current         | true/false          | true/false        |
+// +-----------------+---------------------+-------------------+
+// where:
+// - false indicates the value of the param was set to "false" by a test case
+// - true  indicates the value of the param was set to "true" by a test case
+func RunWatchSemantics(ctx context.Context, t *testing.T, store storage.Interface) {
+	trueVal, falseVal := true, false
+	addEventsFromCreatedPods := func(createdInitialPods []*example.Pod) []watch.Event {
+		var ret []watch.Event
+		for _, createdPod := range createdInitialPods {
+			ret = append(ret, watch.Event{Type: watch.Added, Object: createdPod})
+		}
+		return ret
+	}
+	initialEventsEndFromLastCreatedPod := func(createdInitialPods []*example.Pod) watch.Event {
+		return watch.Event{
+			Type: watch.Bookmark,
+			Object: &example.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					ResourceVersion: createdInitialPods[len(createdInitialPods)-1].ResourceVersion,
+					Annotations:     map[string]string{"k8s.io/initial-events-end": "true"},
+				},
+			},
+		}
+	}
+	scenarios := []struct {
+		name                string
+		allowWatchBookmarks bool
+		sendInitialEvents   *bool
+		resourceVersion     string
+		// useCurrentRV if set gets the current RV from the storage
+		// after adding the initial pods which is then used to establish a new watch request
+		useCurrentRV bool
+
+		initialPods                []*example.Pod
+		podsAfterEstablishingWatch []*example.Pod
+
+		expectedInitialEventsInRandomOrder   func(createdInitialPods []*example.Pod) []watch.Event
+		expectedInitialEventsInStrictOrder   func(createdInitialPods []*example.Pod) []watch.Event
+		expectedEventsAfterEstablishingWatch func(createdPodsAfterWatch []*example.Pod) []watch.Event
+	}{
+		{
+			name:                               "allowWatchBookmarks=true, sendInitialEvents=true, RV=unset",
+			allowWatchBookmarks:                true,
+			sendInitialEvents:                  &trueVal,
+			initialPods:                        []*example.Pod{makePod("1"), makePod("2"), makePod("3")},
+			expectedInitialEventsInRandomOrder: addEventsFromCreatedPods,
+			expectedInitialEventsInStrictOrder: func(createdInitialPods []*example.Pod) []watch.Event {
+				return []watch.Event{initialEventsEndFromLastCreatedPod(createdInitialPods)}
+			},
+			podsAfterEstablishingWatch:           []*example.Pod{makePod("4"), makePod("5")},
+			expectedEventsAfterEstablishingWatch: addEventsFromCreatedPods,
+		},
+		{
+			name:                                 "allowWatchBookmarks=true, sendInitialEvents=false, RV=unset",
+			allowWatchBookmarks:                  true,
+			sendInitialEvents:                    &falseVal,
+			initialPods:                          []*example.Pod{makePod("1"), makePod("2"), makePod("3")},
+			podsAfterEstablishingWatch:           []*example.Pod{makePod("4"), makePod("5")},
+			expectedEventsAfterEstablishingWatch: addEventsFromCreatedPods,
+		},
+		{
+			name:                                 "allowWatchBookmarks=false, sendInitialEvents=false, RV=unset",
+			sendInitialEvents:                    &falseVal,
+			initialPods:                          []*example.Pod{makePod("1"), makePod("2"), makePod("3")},
+			podsAfterEstablishingWatch:           []*example.Pod{makePod("4"), makePod("5")},
+			expectedEventsAfterEstablishingWatch: addEventsFromCreatedPods,
+		},
+		{
+			name:                                 "allowWatchBookmarks=false, sendInitialEvents=true, RV=unset",
+			sendInitialEvents:                    &trueVal,
+			initialPods:                          []*example.Pod{makePod("1"), makePod("2"), makePod("3")},
+			expectedInitialEventsInRandomOrder:   addEventsFromCreatedPods,
+			podsAfterEstablishingWatch:           []*example.Pod{makePod("4"), makePod("5")},
+			expectedEventsAfterEstablishingWatch: addEventsFromCreatedPods,
+		},
+
+		{
+			name:                               "allowWatchBookmarks=true, sendInitialEvents=true, RV=0",
+			allowWatchBookmarks:                true,
+			sendInitialEvents:                  &trueVal,
+			resourceVersion:                    "0",
+			initialPods:                        []*example.Pod{makePod("1"), makePod("2"), makePod("3")},
+			expectedInitialEventsInRandomOrder: addEventsFromCreatedPods,
+			expectedInitialEventsInStrictOrder: func(createdInitialPods []*example.Pod) []watch.Event {
+				return []watch.Event{initialEventsEndFromLastCreatedPod(createdInitialPods)}
+			},
+			podsAfterEstablishingWatch:           []*example.Pod{makePod("4"), makePod("5")},
+			expectedEventsAfterEstablishingWatch: addEventsFromCreatedPods,
+		},
+		{
+			name:                                 "allowWatchBookmarks=true, sendInitialEvents=false, RV=0",
+			allowWatchBookmarks:                  true,
+			sendInitialEvents:                    &falseVal,
+			resourceVersion:                      "0",
+			initialPods:                          []*example.Pod{makePod("1"), makePod("2"), makePod("3")},
+			podsAfterEstablishingWatch:           []*example.Pod{makePod("4"), makePod("5")},
+			expectedEventsAfterEstablishingWatch: addEventsFromCreatedPods,
+		},
+		{
+			name:                                 "allowWatchBookmarks=false, sendInitialEvents=false, RV=0",
+			sendInitialEvents:                    &falseVal,
+			resourceVersion:                      "0",
+			initialPods:                          []*example.Pod{makePod("1"), makePod("2"), makePod("3")},
+			podsAfterEstablishingWatch:           []*example.Pod{makePod("4"), makePod("5")},
+			expectedEventsAfterEstablishingWatch: addEventsFromCreatedPods,
+		},
+		{
+			name:                                 "allowWatchBookmarks=false, sendInitialEvents=true, RV=0",
+			sendInitialEvents:                    &trueVal,
+			resourceVersion:                      "0",
+			initialPods:                          []*example.Pod{makePod("1"), makePod("2"), makePod("3")},
+			expectedInitialEventsInRandomOrder:   addEventsFromCreatedPods,
+			podsAfterEstablishingWatch:           []*example.Pod{makePod("4"), makePod("5")},
+			expectedEventsAfterEstablishingWatch: addEventsFromCreatedPods,
+		},
+
+		{
+			name:                               "allowWatchBookmarks=true, sendInitialEvents=true, RV=1",
+			allowWatchBookmarks:                true,
+			sendInitialEvents:                  &trueVal,
+			resourceVersion:                    "1",
+			initialPods:                        []*example.Pod{makePod("1"), makePod("2"), makePod("3")},
+			expectedInitialEventsInRandomOrder: addEventsFromCreatedPods,
+			expectedInitialEventsInStrictOrder: func(createdInitialPods []*example.Pod) []watch.Event {
+				return []watch.Event{initialEventsEndFromLastCreatedPod(createdInitialPods)}
+			},
+			podsAfterEstablishingWatch:           []*example.Pod{makePod("4"), makePod("5")},
+			expectedEventsAfterEstablishingWatch: addEventsFromCreatedPods,
+		},
+		{
+			name:                                 "allowWatchBookmarks=true, sendInitialEvents=false, RV=1",
+			allowWatchBookmarks:                  true,
+			sendInitialEvents:                    &falseVal,
+			resourceVersion:                      "1",
+			initialPods:                          []*example.Pod{makePod("1"), makePod("2"), makePod("3")},
+			expectedInitialEventsInStrictOrder:   addEventsFromCreatedPods,
+			podsAfterEstablishingWatch:           []*example.Pod{makePod("4"), makePod("5")},
+			expectedEventsAfterEstablishingWatch: addEventsFromCreatedPods,
+		},
+		{
+			name:                                 "allowWatchBookmarks=false, sendInitialEvents=false, RV=1",
+			sendInitialEvents:                    &falseVal,
+			resourceVersion:                      "1",
+			initialPods:                          []*example.Pod{makePod("1"), makePod("2"), makePod("3")},
+			expectedInitialEventsInStrictOrder:   addEventsFromCreatedPods,
+			podsAfterEstablishingWatch:           []*example.Pod{makePod("4"), makePod("5")},
+			expectedEventsAfterEstablishingWatch: addEventsFromCreatedPods,
+		},
+		{
+			name:                                 "allowWatchBookmarks=false, sendInitialEvents=true, RV=1",
+			sendInitialEvents:                    &trueVal,
+			resourceVersion:                      "1",
+			initialPods:                          []*example.Pod{makePod("1"), makePod("2"), makePod("3")},
+			expectedInitialEventsInRandomOrder:   addEventsFromCreatedPods,
+			podsAfterEstablishingWatch:           []*example.Pod{makePod("4"), makePod("5")},
+			expectedEventsAfterEstablishingWatch: addEventsFromCreatedPods,
+		},
+
+		{
+			name:                               "allowWatchBookmarks=true, sendInitialEvents=true, RV=useCurrentRV",
+			allowWatchBookmarks:                true,
+			sendInitialEvents:                  &trueVal,
+			useCurrentRV:                       true,
+			initialPods:                        []*example.Pod{makePod("1"), makePod("2"), makePod("3")},
+			expectedInitialEventsInRandomOrder: addEventsFromCreatedPods,
+			expectedInitialEventsInStrictOrder: func(createdInitialPods []*example.Pod) []watch.Event {
+				return []watch.Event{initialEventsEndFromLastCreatedPod(createdInitialPods)}
+			},
+			podsAfterEstablishingWatch:           []*example.Pod{makePod("4"), makePod("5")},
+			expectedEventsAfterEstablishingWatch: addEventsFromCreatedPods,
+		},
+		{
+			name:                                 "allowWatchBookmarks=true, sendInitialEvents=false, RV=useCurrentRV",
+			allowWatchBookmarks:                  true,
+			sendInitialEvents:                    &falseVal,
+			useCurrentRV:                         true,
+			initialPods:                          []*example.Pod{makePod("1"), makePod("2"), makePod("3")},
+			podsAfterEstablishingWatch:           []*example.Pod{makePod("4"), makePod("5")},
+			expectedEventsAfterEstablishingWatch: addEventsFromCreatedPods,
+		},
+		{
+			name:                                 "allowWatchBookmarks=false, sendInitialEvents=false, RV=useCurrentRV",
+			sendInitialEvents:                    &falseVal,
+			useCurrentRV:                         true,
+			initialPods:                          []*example.Pod{makePod("1"), makePod("2"), makePod("3")},
+			podsAfterEstablishingWatch:           []*example.Pod{makePod("4"), makePod("5")},
+			expectedEventsAfterEstablishingWatch: addEventsFromCreatedPods,
+		},
+		{
+			name:                                 "allowWatchBookmarks=false, sendInitialEvents=true, RV=useCurrentRV",
+			sendInitialEvents:                    &trueVal,
+			useCurrentRV:                         true,
+			initialPods:                          []*example.Pod{makePod("1"), makePod("2"), makePod("3")},
+			expectedInitialEventsInRandomOrder:   addEventsFromCreatedPods,
+			podsAfterEstablishingWatch:           []*example.Pod{makePod("4"), makePod("5")},
+			expectedEventsAfterEstablishingWatch: addEventsFromCreatedPods,
+		},
+
+		{
+			name:                                 "legacy, RV=0",
+			resourceVersion:                      "0",
+			initialPods:                          []*example.Pod{makePod("1"), makePod("2"), makePod("3")},
+			expectedInitialEventsInRandomOrder:   addEventsFromCreatedPods,
+			podsAfterEstablishingWatch:           []*example.Pod{makePod("4"), makePod("5")},
+			expectedEventsAfterEstablishingWatch: addEventsFromCreatedPods,
+		},
+		{
+			name:                                 "legacy, RV=unset",
+			initialPods:                          []*example.Pod{makePod("1"), makePod("2"), makePod("3")},
+			expectedInitialEventsInRandomOrder:   addEventsFromCreatedPods,
+			podsAfterEstablishingWatch:           []*example.Pod{makePod("4"), makePod("5")},
+			expectedEventsAfterEstablishingWatch: addEventsFromCreatedPods,
+		},
+	}
+	for idx, scenario := range scenarios {
+		t.Run(scenario.name, func(t *testing.T) {
+			// set up env
+			defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.WatchList, true)()
+			if scenario.expectedInitialEventsInStrictOrder == nil {
+				scenario.expectedInitialEventsInStrictOrder = func(_ []*example.Pod) []watch.Event { return nil }
+			}
+			if scenario.expectedInitialEventsInRandomOrder == nil {
+				scenario.expectedInitialEventsInRandomOrder = func(_ []*example.Pod) []watch.Event { return nil }
+			}
+			if scenario.expectedEventsAfterEstablishingWatch == nil {
+				scenario.expectedEventsAfterEstablishingWatch = func(_ []*example.Pod) []watch.Event { return nil }
+			}
+
+			var createdPods []*example.Pod
+			ns := fmt.Sprintf("ns-%v", idx)
+			for _, obj := range scenario.initialPods {
+				obj.Namespace = ns
+				out := &example.Pod{}
+				err := store.Create(ctx, computePodKey(obj), obj, out, 0)
+				require.NoError(t, err, "failed to add a pod: %v", obj)
+				createdPods = append(createdPods, out)
+			}
+
+			if scenario.useCurrentRV {
+				currentStorageRV, err := storage.GetCurrentResourceVersionFromStorage(ctx, store, func() runtime.Object { return &example.PodList{} }, "/pods", "")
+				require.NoError(t, err)
+				scenario.resourceVersion = fmt.Sprintf("%d", currentStorageRV)
+			}
+
+			opts := storage.ListOptions{Predicate: storage.Everything, Recursive: true}
+			opts.SendInitialEvents = scenario.sendInitialEvents
+			opts.Predicate.AllowWatchBookmarks = scenario.allowWatchBookmarks
+			if len(scenario.resourceVersion) > 0 {
+				opts.ResourceVersion = scenario.resourceVersion
+			}
+
+			w, err := store.Watch(context.Background(), fmt.Sprintf("/pods/%s", ns), opts)
+			require.NoError(t, err, "failed to create watch: %v")
+			defer w.Stop()
+
+			// make sure we only get initial events
+			testCheckResultsInRandomOrder(t, w, scenario.expectedInitialEventsInRandomOrder(createdPods))
+			testCheckResultsInStrictOrder(t, w, scenario.expectedInitialEventsInStrictOrder(createdPods))
+			testCheckNoMoreResults(t, w)
+
+			createdPods = []*example.Pod{}
+			// add a pod that is greater than the storage's RV when the watch was started
+			for _, obj := range scenario.podsAfterEstablishingWatch {
+				obj.Namespace = ns
+				out := &example.Pod{}
+				err = store.Create(ctx, computePodKey(obj), obj, out, 0)
+				require.NoError(t, err, "failed to add a pod: %v")
+				createdPods = append(createdPods, out)
+			}
+			testCheckResultsInStrictOrder(t, w, scenario.expectedEventsAfterEstablishingWatch(createdPods))
+			testCheckNoMoreResults(t, w)
+		})
+	}
+}
+
+// RunWatchSemanticInitialEventsExtended checks if the bookmark event
+// marking the end of the list stream contains the global RV.
+//
+// note that this scenario differs from the one in RunWatchSemantics
+// by adding the pod to a different ns to advance the global RV
+func RunWatchSemanticInitialEventsExtended(ctx context.Context, t *testing.T, store storage.Interface) {
+	trueVal := true
+	expectedInitialEventsInStrictOrder := func(firstPod, secondPod *example.Pod) []watch.Event {
+		return []watch.Event{
+			{Type: watch.Added, Object: firstPod},
+			{Type: watch.Bookmark, Object: &example.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					ResourceVersion: secondPod.ResourceVersion,
+					Annotations:     map[string]string{"k8s.io/initial-events-end": "true"},
+				},
+			}},
+		}
+	}
+	defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.WatchList, true)()
+
+	ns := "ns-foo"
+	pod := makePod("1")
+	pod.Namespace = ns
+	firstPod := &example.Pod{}
+	err := store.Create(ctx, computePodKey(pod), pod, firstPod, 0)
+	require.NoError(t, err, "failed to add a pod: %v")
+
+	// add the pod to a different ns to advance the global RV
+	pod = makePod("2")
+	pod.Namespace = "other-ns-foo"
+	secondPod := &example.Pod{}
+	err = store.Create(ctx, computePodKey(pod), pod, secondPod, 0)
+	require.NoError(t, err, "failed to add a pod: %v")
+
+	opts := storage.ListOptions{Predicate: storage.Everything, Recursive: true}
+	opts.SendInitialEvents = &trueVal
+	opts.Predicate.AllowWatchBookmarks = true
+
+	w, err := store.Watch(context.Background(), fmt.Sprintf("/pods/%s", ns), opts)
+	require.NoError(t, err, "failed to create watch: %v")
+	defer w.Stop()
+
+	// make sure we only get initial events from the first ns
+	// followed by the bookmark with the global RV
+	testCheckResultsInStrictOrder(t, w, expectedInitialEventsInStrictOrder(firstPod, secondPod))
+	testCheckNoMoreResults(t, w)
+}
+
+func makePod(namePrefix string) *example.Pod {
+	return &example.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: fmt.Sprintf("pod-%s", namePrefix),
+		},
+	}
 }
 
 type testWatchStruct struct {
